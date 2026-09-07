@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Glow Path</title>
+<meta name="description" content="A relaxing finger-drawing star-collecting game." />
+<meta name="theme-color" content="#0B0F1A" />
+
+<!-- Telegram WebApp SDK (official) -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<!-- Fonts: soft rounded display face + clean body face. Loaded async; UI falls back
+     to system fonts instantly so first paint is never blocked on network. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===================== LOADING SCREEN ===================== -->
+  <div id="screen-loading" class="screen active">
+    <div class="loader-orb"></div>
+    <p class="loader-text">Waking up the stars…</p>
+  </div>
+
+  <!-- ===================== ONBOARDING (first run only) ===================== -->
+  <div id="screen-onboarding" class="screen">
+    <div class="onboard-wrap">
+      <div class="onboard-slide" data-step="0">
+        <div class="onboard-glyph" id="onboardGlyphDraw"></div>
+        <h2>Draw a path of light</h2>
+        <p>Trace your finger anywhere on the screen. A glowing trail follows you.</p>
+      </div>
+      <div class="onboard-slide" data-step="1">
+        <div class="onboard-glyph" id="onboardGlyphStars"></div>
+        <h2>Collect the stars</h2>
+        <p>Soft particles drift along your path. Guide them into floating stars to score.</p>
+      </div>
+      <div class="onboard-slide" data-step="2">
+        <div class="onboard-glyph" id="onboardGlyphFade"></div>
+        <h2>Keep the glow alive</h2>
+        <p>Your path fades with time, so keep redrawing before your energy runs out.</p>
+      </div>
+      <div class="onboard-dots">
+        <span class="dot active" data-dot="0"></span>
+        <span class="dot" data-dot="1"></span>
+        <span class="dot" data-dot="2"></span>
+      </div>
+      <button id="btnOnboardNext" class="btn btn-primary">Next</button>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN MENU ===================== -->
+  <div id="screen-menu" class="screen">
+    <header class="menu-top">
+      <div class="pill pill-stars">
+        <span class="pill-icon">★</span>
+        <span id="menuTotalStars">0</span>
+      </div>
+      <div class="pill pill-energy">
+        <span class="pill-icon">⚡</span>
+        <span id="menuEnergy">6</span><span class="pill-sub">/6</span>
+      </div>
+    </header>
+
+    <div class="menu-center">
+      <h1 class="game-title">Glow<span>Path</span></h1>
+      <p class="game-subtitle">Draw. Glow. Collect.</p>
+      <div id="energyTimerWrap" class="energy-timer-wrap" hidden>
+        <span class="energy-timer-label">Next energy in</span>
+        <span id="energyTimer" class="energy-timer">00:00</span>
+      </div>
+    </div>
+
+    <div class="menu-actions">
+      <button id="btnPlay" class="btn btn-primary btn-large">Play</button>
+      <button id="btnDaily" class="btn btn-secondary">
+        Daily Challenge
+        <span id="dailyBadge" class="badge" hidden>NEW</span>
+      </button>
+      <div class="menu-row">
+        <button id="btnSettings" class="btn btn-icon" aria-label="Settings">⚙</button>
+        <button id="btnProgress" class="btn btn-icon" aria-label="Collection">🎨</button>
+      </div>
+    </div>
+
+    <button id="btnGetEnergy" class="btn btn-ghost btn-small" hidden>+2 Energy (Watch Ad)</button>
+  </div>
+
+  <!-- ===================== GAMEPLAY SCREEN ===================== -->
+  <div id="screen-game" class="screen">
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="hud-top">
+      <button id="btnPause" class="hud-btn" aria-label="Pause">❚❚</button>
+      <div class="hud-center">
+        <div class="hud-score"><span id="hudScore">0</span></div>
+        <div id="hudCombo" class="hud-combo" hidden>x<span id="hudComboVal">1</span> combo</div>
+      </div>
+      <div class="hud-timer-wrap">
+        <svg class="hud-timer-ring" viewBox="0 0 44 44">
+          <circle class="ring-track" cx="22" cy="22" r="19"></circle>
+          <circle id="ringProgress" class="ring-progress" cx="22" cy="22" r="19"></circle>
+        </svg>
+        <span id="hudTimeLeft" class="hud-timer-text">45</span>
+      </div>
+    </div>
+
+    <div id="readyOverlay" class="pause-overlay" hidden>
+      <div class="pause-card">
+        <h2 id="readyTitle">Get ready</h2>
+        <p class="results-sub" id="readySub">Draw a path, guide the light, collect stars.</p>
+        <button id="btnStartRun" class="btn btn-primary">Start</button>
+        <button id="btnExtendDuration" class="btn btn-ghost btn-small">+15s Path Duration (Watch Ad)</button>
+      </div>
+    </div>
+
+    <div id="pauseOverlay" class="pause-overlay" hidden>
+      <div class="pause-card">
+        <h2>Paused</h2>
+        <button id="btnResume" class="btn btn-primary">Resume</button>
+        <button id="btnQuit" class="btn btn-secondary">Quit to Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== RESULTS SCREEN ===================== -->
+  <div id="screen-results" class="screen">
+    <div class="results-card">
+      <p class="results-eyebrow" id="resultsEyebrow">Run complete</p>
+      <h2 class="results-score" id="resultsScore">0</h2>
+      <p class="results-sub" id="resultsHigh">Best: 0</p>
+
+      <div class="results-stats">
+        <div class="stat"><span id="resultsStars">0</span><label>stars</label></div>
+        <div class="stat"><span id="resultsCombo">x1</span><label>best combo</label></div>
+      </div>
+
+      <div class="ad-offers">
+        <button id="btnDoubleStars" class="btn btn-ghost btn-small">Double these stars (Watch Ad)</button>
+      </div>
+
+      <div class="results-actions">
+        <button id="btnPlayAgain" class="btn btn-primary btn-large">Play Again</button>
+        <button id="btnBackToMenu" class="btn btn-secondary">Main Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SETTINGS SCREEN ===================== -->
+  <div id="screen-settings" class="screen">
+    <header class="sub-header">
+      <button id="btnSettingsBack" class="hud-btn" aria-label="Back">‹</button>
+      <h2>Settings</h2>
+      <span class="sub-header-spacer"></span>
+    </header>
+    <div class="settings-list">
+      <label class="setting-row">
+        <span>Haptic feedback</span>
+        <input type="checkbox" id="toggleHaptics" checked />
+      </label>
+      <label class="setting-row">
+        <span>Sound</span>
+        <input type="checkbox" id="toggleSound" checked />
+      </label>
+      <label class="setting-row">
+        <span>Reduce motion</span>
+        <input type="checkbox" id="toggleReducedMotion" />
+      </label>
+      <button id="btnResetProgress" class="btn btn-ghost btn-small danger">Reset progress</button>
+      <p class="settings-version">Glow Path · v1.0.0</p>
+    </div>
+  </div>
+
+  <!-- ===================== COLLECTION / PROGRESSION SCREEN ===================== -->
+  <div id="screen-collection" class="screen">
+    <header class="sub-header">
+      <button id="btnCollectionBack" class="hud-btn" aria-label="Back">‹</button>
+      <h2>Collection</h2>
+      <div class="pill pill-stars pill-compact">
+        <span class="pill-icon">★</span><span id="collectionStars">0</span>
+      </div>
+    </header>
+    <div class="collection-section">
+      <h3>Trail colors</h3>
+      <div id="trailGrid" class="swatch-grid"></div>
+    </div>
+    <div class="collection-section">
+      <h3>Particle styles</h3>
+      <div id="particleGrid" class="swatch-grid"></div>
+    </div>
+  </div>
+
+  <!-- Toast for small confirmations -->
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
