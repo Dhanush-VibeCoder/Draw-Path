@@ -125,6 +125,8 @@ button { font-family: inherit; }
   border: 1px solid rgba(234, 242, 255, 0.08);
 }
 .btn[hidden] { display: none; }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn:disabled:active { transform: none; }
 
 /* ============================ Menu screen =============================== */
 .menu-top {

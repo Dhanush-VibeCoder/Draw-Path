@@ -932,49 +932,97 @@ function startDailyChallenge() {
   pendingRun = { daily: true, durationBonusMs: 0 };
 }
 
-/* ====================== 14. AD PLACEHOLDERS (rewarded) ==================== */
+/* ====================== 14. REWARDED ADS (AdsGram) ==================== */
 /*
- * These are intentionally network-agnostic stubs. Wire up a real rewarded
- * ad network (Adsgram, Telegram Ads, AdsForTG, etc. are common choices for
- * Telegram Mini Apps) by replacing the body of `showRewardedAd`. Everything
- * that *calls* showRewardedAd already handles both the success and
- * failure/cancel paths, so no other code needs to change.
+ * Real integration: AdsGram (https://adsgram.ai), a rewarded/interstitial ad
+ * network built specifically for Telegram Mini Apps. Docs:
+ * https://docs.adsgram.ai/publisher/reward-interstitial-code-examples
+ *
+ * The controller is created once (lazily, on first use) and reused for every
+ * ad request — AdsGram's own examples show a single AdController instance
+ * calling .show() repeatedly, not re-initializing per call.
  */
-function showRewardedAd(placement, onReward) {
-  // TODO: Connect rewarded ad network here.
-  // Example shape for most networks:
-  //   AdNetworkSDK.showRewarded(placement).then(onReward).catch(() => showToast('Ad unavailable'));
-  showToast('Loading ad… (placeholder)');
-  setTimeout(() => {
-    onReward();
-  }, 600);
+const ADSGRAM_BLOCK_ID = '46586'; // Glow Path's Rewarded Ad block, from partner.adsgram.ai
+
+let adsgramController = null;
+function getAdsgramController() {
+  if (!adsgramController && window.Adsgram) {
+    adsgramController = window.Adsgram.init({ blockId: ADSGRAM_BLOCK_ID });
+  }
+  return adsgramController;
+}
+
+function showRewardedAd(placement, onReward, buttonEl) {
+  // `placement` isn't used yet since Glow Path only has one AdsGram Block ID
+  // right now — kept as a parameter so a future multi-block setup (e.g. a
+  // separate Block ID per placement) is a one-line change here, not a
+  // rewrite of every call site.
+  const controller = getAdsgramController();
+  if (!controller) {
+    // SDK script hasn't loaded (e.g. blocked network, or testing outside Telegram) — fail soft.
+    showToast('Ad unavailable right now');
+    return;
+  }
+
+  // Loading state: disable the triggering button and swap its label while
+  // the ad is in flight, so a slow network doesn't look like a dead tap.
+  // `buttonEl` is optional — callers that don't pass one just skip this.
+  let originalText = null;
+  if (buttonEl) {
+    originalText = buttonEl.textContent;
+    buttonEl.disabled = true;
+    buttonEl.textContent = 'Loading ad…';
+  }
+  function restoreButton() {
+    if (buttonEl && originalText !== null) {
+      buttonEl.disabled = false;
+      buttonEl.textContent = originalText;
+    }
+  }
+
+  controller.show()
+    .then((result) => {
+      // result.done is true if the user watched to the end (or closed an
+      // interstitial) — for our Rewarded block this means "give the reward."
+      if (result && result.done) {
+        onReward(); // success path — the caller decides the button's final state, if any.
+      } else {
+        restoreButton(); // ad was skipped/incomplete — let the player try again.
+      }
+    })
+    .catch(() => {
+      // User closed early, no fill, or a playback error — no reward, no crash.
+      showToast('Ad unavailable right now');
+      restoreButton();
+    });
 }
 
 function wireAdButtons() {
-  document.getElementById('btnGetEnergy').addEventListener('click', () => {
+  document.getElementById('btnGetEnergy').addEventListener('click', (e) => {
     showRewardedAd('energy_refill', () => {
       addEnergy(2);
       hapticNotify('success');
       showToast('+2 Energy!');
       refreshMenu();
-    });
+    }, e.currentTarget);
   });
 
-  document.getElementById('btnExtendDuration').addEventListener('click', () => {
+  document.getElementById('btnExtendDuration').addEventListener('click', (e) => {
     showRewardedAd('extend_duration', () => {
       hapticNotify('success');
       document.getElementById('readyOverlay').hidden = true;
       pendingRun.durationBonusMs = (pendingRun.durationBonusMs || 0) + 15000;
       Engine.startRound(pendingRun);
-    });
+    }, e.currentTarget);
   });
 
   document.getElementById('btnDoubleStars').addEventListener('click', (e) => {
+    const btn = e.currentTarget;
     showRewardedAd('double_stars', () => {
       Engine.armDoubleStars();
       hapticNotify('success');
-      e.target.disabled = true;
-      e.target.textContent = 'Doubling…';
+      btn.disabled = true;
+      btn.textContent = 'Doubling…';
       // Re-apply to the already-finished run's displayed score immediately
       // (the underlying save was already written with the single value;
       // this keeps the UI + save in lockstep for the *next* persist call).
@@ -984,8 +1032,8 @@ function wireAdButtons() {
       save.totalStars += doubled / 2; // the other half, since the single value was already added
       save.highScore = Math.max(save.highScore, doubled);
       persistSave();
-      e.target.textContent = 'Doubled!';
-    });
+      btn.textContent = 'Doubled!';
+    }, btn);
   });
 }
 
