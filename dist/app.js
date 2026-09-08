@@ -56,7 +56,8 @@ const BACKEND_API_BASE = 'https://glow-path-api.YOUR-SUBDOMAIN.workers.dev';
 
 // TODO: replace with your actual bot username and Mini App short name
 // (from BotFather) — used only to build the shareable referral link.
-const TELEGRAM_BOT_USERNAME = '@Glow_Path_Game_bot';
+// Telegram deep-links must use the bare username, without the leading @.
+const TELEGRAM_BOT_USERNAME = 'Glow_Path_Game_bot';
 const TELEGRAM_APP_SHORT_NAME = 'Glow_Path_Game';
 
 // Mirrors the milestone table in worker.js — kept here only for display
@@ -1166,7 +1167,8 @@ function getMyTelegramUserId() {
 function buildReferralLink() {
   const myId = getMyTelegramUserId();
   if (!myId) return null;
-  return `https://t.me/${TELEGRAM_BOT_USERNAME}/${TELEGRAM_APP_SHORT_NAME}?startapp=ref${myId}`;
+  const botName = TELEGRAM_BOT_USERNAME.replace(/^@/, '');
+  return `https://t.me/${botName}/${TELEGRAM_APP_SHORT_NAME}?startapp=ref${myId}`;
 }
 
 function renderMilestoneList(successfulInvites, claimed) {
