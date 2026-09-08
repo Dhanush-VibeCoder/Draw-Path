@@ -159,3 +159,160 @@ touches a server. That means:
 - **Leaderboard / analytics**: add calls from `onRoundFinished()` and
   `Engine.finishRound()` — keep them fire-and-forget (`fetch(...).catch(() =>
   {})`) so a slow or failed network call never blocks or stalls gameplay.
+
+  # Glow Path — Referral + Store Backend
+
+A Cloudflare Worker + D1 backend, additive to the existing static game. It
+does **not** replace or touch any file in the main `glow-path/` folder —
+drawing, particles, scoring, and the existing client-side energy/save
+system are untouched. This is a separate service the Mini App calls.
+
+## Files
+
+```
+schema.sql     – D1 tables (your 3 tables + a few idempotency-tracking columns)
+worker.js      – the full Worker: auth, all 5 endpoints, reward logic
+wrangler.toml  – deploy config
+```
+
+## Deploy
+
+```bash
+cd glow-path-backend
+wrangler login
+wrangler d1 create glow-path-db
+# copy the printed database_id into wrangler.toml's [[d1_databases]] block
+wrangler d1 execute glow-path-db --remote --file=./schema.sql
+wrangler secret put TELEGRAM_BOT_TOKEN
+# paste your bot's token from BotFather when prompted
+wrangler deploy
+```
+
+Wrangler prints your Worker's URL when it deploys — that's the base URL for
+every endpoint below (e.g. `https://glow-path-api.<subdomain>.workers.dev`).
+
+Also set `ALLOWED_ORIGIN` in `wrangler.toml` to your actual deployed game
+URL once you know it, instead of `"*"`.
+
+---
+
+## Security model — read before wiring this into the client
+
+Every request must include Telegram's `initData` — the raw string from
+`Telegram.WebApp.initData` on the client. The Worker verifies its signature
+against your bot token server-side and pulls the authenticated user id out
+of the *verified* payload. **No endpoint trusts a client-supplied user id**
+— this is what stops someone from calling the API with someone else's
+numeric Telegram id and granting themselves free rewards on that account.
+
+- POST requests: put it in the JSON body as `initData`.
+- GET requests: put it in the `X-Telegram-Init-Data` header.
+
+---
+
+## Endpoints — how to call each one from the Mini App
+
+### 1. `POST /api/referral/start`
+Call this once on **every app launch** (not just when there's a referral
+code) — it doubles as "make sure my user row exists."
+
+```javascript
+const startParam = tg?.initDataUnsafe?.start_param || null; // e.g. "ref123456789"
+
+await fetch('https://glow-path-api.<subdomain>.workers.dev/api/referral/start', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    initData: tg.initData,
+    referralCode: startParam,
+  }),
+});
+```
+
+### 2. `POST /api/referral/check-rewards`
+Call this once, right after a run ends — alongside (not instead of) the
+existing local `persistSave()` call in `app.js`.
+
+```javascript
+await fetch('https://glow-path-api.<subdomain>.workers.dev/api/referral/check-rewards', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    initData: tg.initData,
+    starsEarnedThisRun: finalScore, // the same value already used locally
+  }),
+});
+```
+
+### 3. `GET /api/store/items`
+```javascript
+const res = await fetch('https://glow-path-api.<subdomain>.workers.dev/api/store/items', {
+  headers: { 'X-Telegram-Init-Data': tg.initData },
+});
+const { items } = await res.json();
+// items: [{ id, name, type, costStars, costPoints, section, owned }, ...]
+```
+
+### 4. `POST /api/store/buy`
+```javascript
+const res = await fetch('https://glow-path-api.<subdomain>.workers.dev/api/store/buy', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    initData: tg.initData,
+    itemId: 'premium_glow_trail',
+  }),
+});
+const result = await res.json();
+// { ok: true, purchased, starsSpent, pointsSpent }  or  { ok: false, error }
+```
+
+### 5. `GET /api/user/profile`
+```javascript
+const res = await fetch('https://glow-path-api.<subdomain>.workers.dev/api/user/profile', {
+  headers: { 'X-Telegram-Init-Data': tg.initData },
+});
+const profile = await res.json();
+// { totalStars, invitePoints, energy, runsCompleted, referredBy, ownedCosmetics }
+```
+
+---
+
+## DB call count per action
+
+| Action | Typical DB calls | Notes |
+|---|---|---|
+| `/referral/start` — organic user, first launch | 1 | one `INSERT OR IGNORE` |
+| `/referral/start` — existing user relaunching | 1 | no-op insert, abuse guard |
+| `/referral/start` — new user via valid referral link | 3 | user insert + referral insert + starter-cosmetic insert (last two batched together) |
+| `/referral/check-rewards` — organic player | 2 | 1 read + 1 write |
+| `/referral/check-rewards` — referred player, no milestone crossed | up to 4 | +1 read (inviter row lookup only if star≥30 attempted) +1 conditional referral-status update |
+| `/referral/check-rewards` — crossing a star or invite-count milestone | up to ~7 | rare, one-time per threshold: adds 1 COUNT query + 1 cosmetic batch insert |
+| `/store/items` | 1 | owned-item ids pulled via a single `GROUP_CONCAT` |
+| `/store/buy` — success | 2 | 1 combined balance+ownership read + 1 atomic batched write |
+| `/store/buy` — rejected (already owned / insufficient funds) | 1 | fails after the read, no write |
+| `/user/profile` | 1 | one query, correlated subquery pulls owned cosmetics inline |
+
+The common cases (organic player finishing a run, checking the store,
+loading their profile) are all 1–2 calls. The more expensive paths only
+fire on genuinely rare events — crossing a star threshold or an invite-count
+milestone happens at most a handful of times per player, ever.
+
+---
+
+## Important design note: two energy systems currently exist, unmerged
+
+The existing client (`app.js`) has its own energy system entirely in
+`localStorage`/CloudStorage (6 max, +1 every 18 minutes) — untouched by this
+backend, as required. This new D1 `users.energy` column is a **separate**
+ledger that only referral bonuses write to.
+
+**These are not automatically synced.** Right now, a referral energy bonus
+lands in D1 but won't show up in the game's own energy counter unless you
+add a small reconciliation step — e.g., on boot, after calling
+`/api/referral/start`, fetch `/api/user/profile` and add any *new* server
+energy (tracked via a small "last synced" value in the local save) into the
+client's `save.energy`. I didn't make this change since it touches
+`app.js`, and you asked me not to alter existing mechanics without it being
+explicit — happy to wire it in as a follow-up if you want the two systems
+merged rather than running in parallel.

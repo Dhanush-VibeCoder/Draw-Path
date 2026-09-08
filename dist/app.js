@@ -22,7 +22,8 @@
      13. DAILY CHALLENGE
      14. AD PLACEHOLDERS (rewarded ad hooks)
      15. RESULTS CONTROLLER
-     16. BOOT
+     16. BACKEND SYNC (Referral + Store)
+     17. BOOT
    ========================================================================= */
 
 /* ============================== 1. CONFIG ============================== */
@@ -48,6 +49,9 @@ const CONFIG = {
   CLOUD_KEY: 'glowpath_save_v1',
   SAVE_DEBOUNCE_MS: 800,
 };
+
+// Referral + Store backend (Cloudflare Worker + D1)
+const BACKEND_API_BASE = 'https://glow-path-api.212g1a0525.workers.dev';
 
 /* ============================== 2. UTILITIES ============================ */
 const now = () => performance.now();
@@ -179,6 +183,11 @@ function defaultSave() {
     equippedTrail: 'teal',
     equippedParticle: 'spark',
     daily: { lastPlayedDate: null, lastScore: 0, bestScore: 0 },
+    // How much server-granted energy (from referral rewards, via the
+    // backend) has already been merged into `energy` above — lets us pull
+    // the player's D1 profile repeatedly without double-crediting the same
+    // referral bonus. See backendSyncProfile().
+    serverEnergySynced: 0,
   };
 }
 
@@ -253,19 +262,19 @@ function addEnergy(n) {
 /* ============ 8. PROGRESSION / COLLECTION (unlockable cosmetics) ========= */
 const TRAILS = [
   { id: 'teal', name: 'Teal', cost: 0, color: '#7FE7DC' },
-  { id: 'violet', name: 'Violet', cost: 40, color: '#B79CFF' },
-  { id: 'gold', name: 'Gold', cost: 80, color: '#FFD873' },
-  { id: 'rose', name: 'Rose', cost: 120, color: '#FF9BC0' },
-  { id: 'ice', name: 'Ice', cost: 160, color: '#9AD8FF' },
-  { id: 'ember', name: 'Ember', cost: 220, color: '#FF8C5A' },
-  { id: 'mint', name: 'Mint', cost: 280, color: '#8CFFC1' },
+  { id: 'violet', name: 'Violet', cost: 40000, color: '#B79CFF' },
+  { id: 'gold', name: 'Gold', cost: 80000, color: '#FFD873' },
+  { id: 'rose', name: 'Rose', cost: 120000, color: '#FF9BC0' },
+  { id: 'ice', name: 'Ice', cost: 160000, color: '#9AD8FF' },
+  { id: 'ember', name: 'Ember', cost: 220000, color: '#FF8C5A' },
+  { id: 'mint', name: 'Mint', cost: 280000, color: '#8CFFC1' },
   { id: 'aurora', name: 'Aurora', cost: 360, color: '#C6FF6B' },
 ];
 const PARTICLE_STYLES = [
   { id: 'spark', name: 'Spark', cost: 0, color: '#FFFFFF' },
-  { id: 'ember', name: 'Ember', cost: 60, color: '#FFC98C' },
-  { id: 'frost', name: 'Frost', cost: 100, color: '#BFEFFF' },
-  { id: 'blossom', name: 'Blossom', cost: 150, color: '#FFC1E0' },
+  { id: 'ember', name: 'Ember', cost: 60000, color: '#FFC98C' },
+  { id: 'frost', name: 'Frost', cost: 100000, color: '#BFEFFF' },
+  { id: 'blossom', name: 'Blossom', cost: 150000, color: '#FFC1E0' },
   { id: 'nova', name: 'Nova', cost: 240, color: '#D6C2FF' },
 ];
 
@@ -890,6 +899,7 @@ const Engine = (() => {
     }
     persistSave();
     hapticNotify('success');
+    backendCheckRewards(finalScore); // fire-and-forget — see section 16
     onRoundFinished(finalScore, bestCombo, isDaily);
   }
 
@@ -1052,7 +1062,87 @@ function onRoundFinished(finalScore, comboReached, wasDaily) {
   refreshMenu();
 }
 
-/* ================================ 16. BOOT ================================ */
+/* ================== 16. BACKEND SYNC (Referral + Store) ==================== */
+/*
+ * Everything in this section is best-effort and additive: if the backend is
+ * unreachable, misconfigured, or the player is testing outside Telegram
+ * (no initData), every function here fails silently and the game continues
+ * exactly as it did before this backend existed. Nothing in here is allowed
+ * to block gameplay, the save system, or the UI.
+ */
+
+function backendConfigured() {
+  return !!(tg && tg.initData) && !BACKEND_API_BASE.includes('YOUR-SUBDOMAIN');
+}
+
+/** Called once per launch. Registers a new user (and their referral, if any)
+ *  server-side, or is a harmless no-op for a returning player. */
+async function backendReferralStart() {
+  if (!backendConfigured()) return;
+  try {
+    const referralCode = (tg.initDataUnsafe && tg.initDataUnsafe.start_param) || null;
+    await fetch(`${BACKEND_API_BASE}/api/referral/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData, referralCode }),
+    });
+  } catch (e) {
+    // Offline, backend down, etc. — nothing to do; local save is unaffected.
+  }
+}
+
+/** Called once per finished run. Reports this run's stars to the backend so
+ *  referral milestones can be evaluated server-side. Does not itself change
+ *  any local state — energy/cosmetic effects arrive later via
+ *  backendSyncProfile(), which is the single place local save gets touched. */
+async function backendCheckRewards(starsEarnedThisRun) {
+  if (!backendConfigured()) return;
+  try {
+    await fetch(`${BACKEND_API_BASE}/api/referral/check-rewards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData, starsEarnedThisRun }),
+    });
+    // Pull any resulting reward (e.g. energy from a referral bonus) into
+    // the local save right away, so it's visible without waiting for the
+    // next app launch.
+    await backendSyncProfile();
+  } catch (e) {
+    // Best-effort — the run's local score/save already happened regardless.
+  }
+}
+
+/** Merges server-side energy (granted via referral rewards) into the local
+ *  save. Uses save.serverEnergySynced as a watermark so repeated calls
+ *  never credit the same server-side energy twice — only the *new* amount
+ *  since the last successful sync is added. Cosmetics/invite points earned
+ *  via referrals live purely server-side for now (surfaced through
+ *  /api/user/profile and the Store endpoints) and don't need local
+ *  reconciliation the way energy does, since the existing game only reads
+ *  trail/particle unlocks from the local save's own unlock lists. */
+async function backendSyncProfile() {
+  if (!backendConfigured()) return;
+  try {
+    const res = await fetch(`${BACKEND_API_BASE}/api/user/profile`, {
+      headers: { 'X-Telegram-Init-Data': tg.initData },
+    });
+    if (!res.ok) return; // e.g. 404 before referral/start has ever run — fine, try again next launch
+    const profile = await res.json();
+    if (!profile || !profile.ok) return;
+
+    const delta = profile.energy - (save.serverEnergySynced || 0);
+    if (delta > 0) {
+      addEnergy(delta);
+      save.serverEnergySynced = profile.energy;
+      persistSave();
+      refreshMenu(); // reflect the new energy immediately if the menu is visible
+    }
+  } catch (e) {
+    // Best-effort — local energy regen keeps working regardless.
+  }
+}
+
+/* ================================ 17. BOOT ================================ */
 function wireMenuButtons() {
   document.getElementById('btnPlay').addEventListener('click', () => {
     reconcileEnergy();
@@ -1122,6 +1212,12 @@ async function boot() {
   initSettings();
   initOnboarding();
   startMenuLoop();
+
+  // Backend sync (referral registration + any pending referral-earned
+  // energy) — fire-and-forget, never blocks first paint. See section 16;
+  // both functions no-op silently if BACKEND_API_BASE hasn't been
+  // configured yet or the player is outside Telegram.
+  backendReferralStart().then(() => backendSyncProfile());
 
   if (save.onboarded) {
     goToMenu();

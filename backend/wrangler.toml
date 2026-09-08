@@ -1,0 +1,36 @@
+# =============================================================================
+# GLOW PATH — Referral + Store Worker — wrangler.toml
+# =============================================================================
+# Deploy steps (run from this directory):
+#   1. wrangler login
+#   2. wrangler d1 create glow-path-db
+#      -> copy the returned database_id into the [[d1_databases]] block below
+#   3. wrangler d1 execute glow-path-db --remote --file=./schema.sql
+#   4. wrangler secret put TELEGRAM_BOT_TOKEN
+#      -> paste the bot token from BotFather when prompted
+#   5. wrangler deploy
+#
+# After deploying, wrangler prints your Worker's URL
+# (e.g. https://glow-path-api.<your-subdomain>.workers.dev) — that's the
+# base URL the Mini App calls for every /api/... endpoint.
+# =============================================================================
+
+name = "glow-path-api"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"                      # accessed in worker.js as env.DB
+database_name = "glow-path-db"
+database_id = "9701fd8d-ec38-4c70-bd8d-655d22945047"
+
+[vars]
+# Set this to your actual deployed game origin once you know it, e.g.
+# "https://draw-path.212g1a0525.workers.dev" — restricts which sites can
+# call this API via CORS. "*" works for testing but is looser than needed
+# for production.
+ALLOWED_ORIGIN = "*"
+
+# TELEGRAM_BOT_TOKEN is a secret, not a var — set it with:
+#   wrangler secret put TELEGRAM_BOT_TOKEN
+# Never commit the actual token to source control.
