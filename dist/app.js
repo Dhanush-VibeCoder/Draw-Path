@@ -51,8 +51,7 @@ const CONFIG = {
 };
 
 // Referral + Store backend (Cloudflare Worker + D1)
-const BACKEND_API_BASE = 'https://glow-path-api.212g1a0525.workers.dev';
-
+const BACKEND_API_BASE = 'https://glow-path-api.212g1a0525
 /* ============================== 2. UTILITIES ============================ */
 const now = () => performance.now();
 const wallClock = () => Date.now();
