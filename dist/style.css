@@ -339,6 +339,51 @@ button { font-family: inherit; }
 .swatch.equipped { border-color: var(--accent-glow); }
 .swatch .lock-icon { position: absolute; top: 4px; right: 6px; font-size: 10px; }
 
+/* ============================ Referral screen =============================== */
+.referral-section { padding: 4px 20px 18px; }
+.referral-blurb { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+.referral-link-box {
+  background: var(--bg-panel-2);
+  border: 1px solid rgba(234,242,255,0.1);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--accent-glow);
+  word-break: break-all;
+  margin-bottom: 12px;
+}
+.referral-actions { display: flex; gap: 10px; }
+.referral-actions .btn { flex: 1; }
+.referral-section h3 { font-family: var(--font-display); font-size: 14px; color: var(--text-primary); margin: 0 0 12px; font-weight: 600; }
+.referral-section h3 span { color: var(--star-gold); }
+
+.milestone-list { display: flex; flex-direction: column; gap: 8px; }
+.milestone-row {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg-panel-2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  border: 1px solid rgba(234,242,255,0.06);
+}
+.milestone-row.claimed { border-color: rgba(127,231,220,0.35); }
+.milestone-row .milestone-label { font-size: 13px; color: var(--text-primary); }
+.milestone-row .milestone-reward { font-size: 11px; color: var(--text-muted); }
+.milestone-row .milestone-check { font-size: 16px; color: var(--accent-glow); }
+
+/* ============================ Store screen =================================== */
+.store-balance-row { display: flex; gap: 10px; justify-content: center; padding: 0 20px 14px; }
+.store-item-list { display: flex; flex-direction: column; gap: 10px; }
+.store-item {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg-panel-2);
+  border: 1px solid rgba(234,242,255,0.08);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.store-item .store-item-name { font-size: 14px; color: var(--text-primary); font-weight: 600; }
+.store-item .store-item-cost { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.store-item .btn { padding: 8px 14px; font-size: 12px; white-space: nowrap; }
+
 /* ============================ Toast =================================== */
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 26px);

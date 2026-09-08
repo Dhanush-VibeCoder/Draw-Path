@@ -87,6 +87,8 @@
       <div class="menu-row">
         <button id="btnSettings" class="btn btn-icon" aria-label="Settings">⚙</button>
         <button id="btnProgress" class="btn btn-icon" aria-label="Collection">🎨</button>
+        <button id="btnStore" class="btn btn-icon" aria-label="Store">🛍</button>
+        <button id="btnReferral" class="btn btn-icon" aria-label="Invite Friends">🔗</button>
       </div>
     </div>
 
@@ -194,6 +196,56 @@
     <div class="collection-section">
       <h3>Particle styles</h3>
       <div id="particleGrid" class="swatch-grid"></div>
+    </div>
+  </div>
+
+  <!-- ===================== REFERRAL SCREEN ===================== -->
+  <div id="screen-referral" class="screen">
+    <header class="sub-header">
+      <button id="btnReferralBack" class="hud-btn" aria-label="Back">‹</button>
+      <h2>Invite Friends</h2>
+      <div class="pill pill-stars pill-compact">
+        <span class="pill-icon">🎟</span><span id="referralPoints">0</span>
+      </div>
+    </header>
+
+    <div class="referral-section">
+      <p class="referral-blurb">
+        Share your link — when a friend plays their first run, you both get rewarded.
+      </p>
+      <div class="referral-link-box">
+        <span id="referralLinkText">Loading your link…</span>
+      </div>
+      <div class="referral-actions">
+        <button id="btnCopyReferral" class="btn btn-secondary btn-small">Copy Link</button>
+        <button id="btnShareReferral" class="btn btn-primary btn-small">Share via Telegram</button>
+      </div>
+    </div>
+
+    <div class="referral-section">
+      <h3>Your invites: <span id="referralCount">0</span></h3>
+      <div id="milestoneList" class="milestone-list"></div>
+    </div>
+  </div>
+
+  <!-- ===================== STORE SCREEN ===================== -->
+  <div id="screen-store" class="screen">
+    <header class="sub-header">
+      <button id="btnStoreBack" class="hud-btn" aria-label="Back">‹</button>
+      <h2>Store</h2>
+    </header>
+    <div class="store-balance-row">
+      <div class="pill pill-stars pill-compact"><span class="pill-icon">★</span><span id="storeStars">0</span></div>
+      <div class="pill pill-stars pill-compact"><span class="pill-icon">🎟</span><span id="storePoints">0</span></div>
+    </div>
+
+    <div class="collection-section">
+      <h3>Normal Items</h3>
+      <div id="normalItemsList" class="store-item-list"></div>
+    </div>
+    <div class="collection-section">
+      <h3>Premium Items</h3>
+      <div id="premiumItemsList" class="store-item-list"></div>
     </div>
   </div>
 

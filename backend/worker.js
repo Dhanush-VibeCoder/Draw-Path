@@ -452,9 +452,15 @@ async function handleUserProfile(request, env) {
   const userId = await authenticate(request, env, null);
   if (!userId) return fail('Unauthorized: invalid or missing Telegram initData', 401, env);
 
+  // Single query — the two correlated subqueries (owned cosmetics,
+  // successful-invite count) ride along with the main row read, so this
+  // stays at 1 DB call even though the Referral screen now needs more data.
   const row = await env.DB.prepare(
     `SELECT u.total_stars, u.invite_points, u.energy, u.runs_completed, u.referrer_id,
-            (SELECT GROUP_CONCAT(item_id) FROM user_cosmetics WHERE user_id = u.user_id) AS owned
+            u.invite_milestone_3, u.invite_milestone_5, u.invite_milestone_10,
+            u.invite_milestone_25, u.invite_milestone_50,
+            (SELECT GROUP_CONCAT(item_id) FROM user_cosmetics WHERE user_id = u.user_id) AS owned,
+            (SELECT COUNT(*) FROM referrals WHERE inviter_id = u.user_id AND status = 'completed') AS successful_invites
      FROM users u WHERE u.user_id = ?`
   ).bind(userId).first();
 
@@ -467,6 +473,14 @@ async function handleUserProfile(request, env) {
     runsCompleted: row.runs_completed,
     referredBy: row.referrer_id || null,
     ownedCosmetics: row.owned ? row.owned.split(',') : [],
+    successfulInvites: row.successful_invites || 0,
+    inviteMilestonesClaimed: {
+      3: !!row.invite_milestone_3,
+      5: !!row.invite_milestone_5,
+      10: !!row.invite_milestone_10,
+      25: !!row.invite_milestone_25,
+      50: !!row.invite_milestone_50,
+    },
   }, env);
 }
 
