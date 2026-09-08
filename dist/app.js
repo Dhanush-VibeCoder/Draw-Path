@@ -50,8 +50,24 @@ const CONFIG = {
   SAVE_DEBOUNCE_MS: 800,
 };
 
-// Referral + Store backend (Cloudflare Worker + D1)
-const BACKEND_API_BASE = 'https://glow-path-api.212g1a0525.workers.dev';
+// Referral + Store backend (Cloudflare Worker + D1) — see /glow-path-backend.
+// TODO: replace with your deployed Worker URL after `wrangler deploy`.
+const BACKEND_API_BASE = 'https://glow-path-api.YOUR-SUBDOMAIN.workers.dev';
+
+// TODO: replace with your actual bot username and Mini App short name
+// (from BotFather) — used only to build the shareable referral link.
+const TELEGRAM_BOT_USERNAME = '@Glow_Path_Game_bot';
+const TELEGRAM_APP_SHORT_NAME = 'Glow_Path_Game';
+
+// Mirrors the milestone table in worker.js — kept here only for display
+// (labels/order); the backend is the source of truth for what's granted.
+const INVITE_COUNT_MILESTONES_UI = [
+  { count: 3, label: '3 invites', reward: '30 Invite Points + Badge' },
+  { count: 5, label: '5 invites', reward: '50 Invite Points + Special Trail' },
+  { count: 10, label: '10 invites', reward: '100 Invite Points + Rare Particle' },
+  { count: 25, label: '25 invites', reward: '200 Invite Points + Legendary Frame' },
+  { count: 50, label: '50 invites', reward: '400 Invite Points + Exclusive Title' },
+];
 
 /* ============================== 2. UTILITIES ============================ */
 const now = () => performance.now();
@@ -268,14 +284,14 @@ const TRAILS = [
   { id: 'ice', name: 'Ice', cost: 160000, color: '#9AD8FF' },
   { id: 'ember', name: 'Ember', cost: 220000, color: '#FF8C5A' },
   { id: 'mint', name: 'Mint', cost: 280000, color: '#8CFFC1' },
-  { id: 'aurora', name: 'Aurora', cost: 360, color: '#C6FF6B' },
+  { id: 'aurora', name: 'Aurora', cost: 360000, color: '#C6FF6B' },
 ];
 const PARTICLE_STYLES = [
   { id: 'spark', name: 'Spark', cost: 0, color: '#FFFFFF' },
   { id: 'ember', name: 'Ember', cost: 60000, color: '#FFC98C' },
   { id: 'frost', name: 'Frost', cost: 100000, color: '#BFEFFF' },
   { id: 'blossom', name: 'Blossom', cost: 150000, color: '#FFC1E0' },
-  { id: 'nova', name: 'Nova', cost: 240, color: '#D6C2FF' },
+  { id: 'nova', name: 'Nova', cost: 240000, color: '#D6C2FF' },
 ];
 
 function renderCollectionGrids() {
@@ -1142,6 +1158,181 @@ async function backendSyncProfile() {
   }
 }
 
+/* ---- Referral screen ------------------------------------------------- */
+
+function getMyTelegramUserId() {
+  return (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? String(tg.initDataUnsafe.user.id) : null;
+}
+function buildReferralLink() {
+  const myId = getMyTelegramUserId();
+  if (!myId) return null;
+  return `https://t.me/${TELEGRAM_BOT_USERNAME}/${TELEGRAM_APP_SHORT_NAME}?startapp=ref${myId}`;
+}
+
+function renderMilestoneList(successfulInvites, claimed) {
+  const list = document.getElementById('milestoneList');
+  list.innerHTML = '';
+  INVITE_COUNT_MILESTONES_UI.forEach((m) => {
+    const isClaimed = !!(claimed && claimed[m.count]);
+    const row = document.createElement('div');
+    row.className = 'milestone-row' + (isClaimed ? ' claimed' : '');
+    row.innerHTML = `
+      <div>
+        <div class="milestone-label">${m.label}</div>
+        <div class="milestone-reward">${m.reward}</div>
+      </div>
+      <div class="milestone-check">${isClaimed ? '✓' : `${Math.min(successfulInvites, m.count)}/${m.count}`}</div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+async function openReferralScreen() {
+  showScreen('screen-referral');
+
+  const link = buildReferralLink();
+  document.getElementById('referralLinkText').textContent = link || 'Open this game from inside Telegram to get your link.';
+
+  if (!backendConfigured()) {
+    renderMilestoneList(0, {});
+    return;
+  }
+  try {
+    const res = await fetch(`${BACKEND_API_BASE}/api/user/profile`, {
+      headers: { 'X-Telegram-Init-Data': tg.initData },
+    });
+    const profile = await res.json();
+    if (profile && profile.ok) {
+      document.getElementById('referralPoints').textContent = profile.invitePoints;
+      document.getElementById('referralCount').textContent = profile.successfulInvites;
+      renderMilestoneList(profile.successfulInvites, profile.inviteMilestonesClaimed);
+    }
+  } catch (e) {
+    // Leave the screen showing zeroes/placeholders — non-fatal.
+  }
+}
+
+function wireReferralScreen() {
+  document.getElementById('btnReferral').addEventListener('click', openReferralScreen);
+  document.getElementById('btnReferralBack').addEventListener('click', goToMenu);
+
+  document.getElementById('btnCopyReferral').addEventListener('click', async () => {
+    const link = buildReferralLink();
+    if (!link) { showToast('Open this from inside Telegram first'); return; }
+    try {
+      await navigator.clipboard.writeText(link);
+      hapticSelect();
+      showToast('Link copied!');
+    } catch (e) {
+      showToast('Could not copy — long-press the link to copy it manually');
+    }
+  });
+
+  document.getElementById('btnShareReferral').addEventListener('click', () => {
+    const link = buildReferralLink();
+    if (!link) { showToast('Open this from inside Telegram first'); return; }
+    const shareText = 'Come draw glowing paths and collect stars with me in Glow Path! ✨';
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(shareText)}`;
+    if (tg && tg.openTelegramLink) {
+      tg.openTelegramLink(shareUrl);
+    } else {
+      window.open(shareUrl, '_blank');
+    }
+  });
+}
+
+/* ---- Store screen ------------------------------------------------------ */
+
+function renderStoreList(container, items) {
+  container.innerHTML = '';
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'store-item';
+    const costLabel = item.section === 'premium'
+      ? `${item.costStars.toLocaleString()} ★ + ${item.costPoints} 🎟`
+      : `${item.costStars.toLocaleString()} ★ or ${item.costPoints} 🎟`;
+    row.innerHTML = `
+      <div>
+        <div class="store-item-name">${item.name}</div>
+        <div class="store-item-cost">${costLabel}</div>
+      </div>
+    `;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary';
+    if (item.owned) {
+      btn.textContent = 'Owned';
+      btn.disabled = true;
+    } else {
+      btn.textContent = 'Buy';
+      btn.addEventListener('click', () => buyStoreItem(item.id, btn));
+    }
+    row.appendChild(btn);
+    container.appendChild(row);
+  });
+}
+
+async function openStoreScreen() {
+  showScreen('screen-store');
+  if (!backendConfigured()) {
+    showToast('Store is unavailable right now');
+    return;
+  }
+  try {
+    const [itemsRes, profileRes] = await Promise.all([
+      fetch(`${BACKEND_API_BASE}/api/store/items`, { headers: { 'X-Telegram-Init-Data': tg.initData } }),
+      fetch(`${BACKEND_API_BASE}/api/user/profile`, { headers: { 'X-Telegram-Init-Data': tg.initData } }),
+    ]);
+    const itemsData = await itemsRes.json();
+    const profile = await profileRes.json();
+
+    if (profile && profile.ok) {
+      document.getElementById('storeStars').textContent = profile.totalStars.toLocaleString();
+      document.getElementById('storePoints').textContent = profile.invitePoints;
+    }
+    if (itemsData && itemsData.ok) {
+      const normal = itemsData.items.filter((i) => i.section === 'normal');
+      const premium = itemsData.items.filter((i) => i.section === 'premium');
+      renderStoreList(document.getElementById('normalItemsList'), normal);
+      renderStoreList(document.getElementById('premiumItemsList'), premium);
+    }
+  } catch (e) {
+    showToast('Could not load the store — check your connection');
+  }
+}
+
+async function buyStoreItem(itemId, buttonEl) {
+  if (!backendConfigured()) return;
+  buttonEl.disabled = true;
+  buttonEl.textContent = '…';
+  try {
+    const res = await fetch(`${BACKEND_API_BASE}/api/store/buy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData, itemId }),
+    });
+    const result = await res.json();
+    if (result && result.ok) {
+      hapticNotify('success');
+      showToast('Purchased!');
+      openStoreScreen(); // refresh balances + owned state
+    } else {
+      hapticNotify('error');
+      showToast((result && result.error) || 'Purchase failed');
+      buttonEl.disabled = false;
+      buttonEl.textContent = 'Buy';
+    }
+  } catch (e) {
+    showToast('Could not reach the store — try again');
+    buttonEl.disabled = false;
+    buttonEl.textContent = 'Buy';
+  }
+}
+
+function wireStoreScreen() {
+  document.getElementById('btnStore').addEventListener('click', openStoreScreen);
+  document.getElementById('btnStoreBack').addEventListener('click', goToMenu);
+}
+
 /* ================================ 17. BOOT ================================ */
 function wireMenuButtons() {
   document.getElementById('btnPlay').addEventListener('click', () => {
@@ -1209,6 +1400,8 @@ async function boot() {
   reconcileEnergy();
   wireMenuButtons();
   wireAdButtons();
+  wireReferralScreen();
+  wireStoreScreen();
   initSettings();
   initOnboarding();
   startMenuLoop();
