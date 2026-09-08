@@ -942,7 +942,7 @@ function startDailyChallenge() {
  * ad request — AdsGram's own examples show a single AdController instance
  * calling .show() repeatedly, not re-initializing per call.
  */
-const ADSGRAM_BLOCK_ID = '46602'; // Glow Path's Rewarded Ad block, from partner.adsgram.ai
+const ADSGRAM_BLOCK_ID = '46743'; // Glow Path's Rewarded Ad block, from partner.adsgram.ai
 
 let adsgramController = null;
 function getAdsgramController() {
