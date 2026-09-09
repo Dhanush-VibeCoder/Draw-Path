@@ -1167,8 +1167,25 @@ function getMyTelegramUserId() {
 function buildReferralLink() {
   const myId = getMyTelegramUserId();
   if (!myId) return null;
-  const botName = TELEGRAM_BOT_USERNAME.replace(/^@/, '');
-  return `https://t.me/${botName}/${TELEGRAM_APP_SHORT_NAME}?startapp=ref${myId}`;
+
+  const botName = TELEGRAM_BOT_USERNAME.replace(/^@/, '').trim();
+  const appName = (TELEGRAM_APP_SHORT_NAME || '').replace(/^@/, '').trim();
+  const referralParam = `ref${myId}`;
+
+  // Prefer the bot-root deep link for maximum compatibility with Telegram Mini App
+  // registration. Some bots reject the /<app-name> link if the app short name does
+  // not exactly match BotFather's registered app short name or if the Mini App is
+  // not yet published in the bot's app list. The root bot URL still accepts the
+  // startapp param and is the safe option for referrals.
+  if (botName) {
+    return `https://t.me/${botName}?startapp=${referralParam}`;
+  }
+
+  if (appName) {
+    return `https://t.me/${botName}/${appName}?startapp=${referralParam}`;
+  }
+
+  return null;
 }
 
 function renderMilestoneList(successfulInvites, claimed) {
