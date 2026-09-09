@@ -74,40 +74,7 @@ const PREMIUM_ITEMS = [
   { id: 'legendary_frame', name: 'Legendary Frame', type: 'frame', costStars: 60_000, costPoints: 120 },
   { id: 'mythic_aura_trail', name: 'Mythic Aura + Trail', type: 'bundle', costStars: 100_000, costPoints: 200 },
 ];
-
-// "Legacy" items — these mirror the game's ORIGINAL, client-only trail and
-// particle unlocks (the TRAILS/PARTICLE_STYLES arrays in app.js), so that
-// buying one of those the normal way also deducts from — and is reflected
-// in — the same authoritative server-side total_stars used by the Store.
-// IDs are namespaced with trail_/particle_ prefixes because the original
-// client-side lists both happen to use the id "ember" for two different
-// items (a trail AND a particle style) — harmless locally since they're
-// kept in separate arrays there, but would collide in this single
-// item_id-keyed ownership table without the prefix. costPoints is 0 for
-// all of these: the original mechanic was always stars-only.
-// IMPORTANT: keep this list's ids/costs in sync with app.js if you ever
-// change TRAILS or PARTICLE_STYLES there.
-const LEGACY_ITEMS = [
-  { id: 'trail_teal', name: 'Teal Trail (starter)', type: 'trail', costStars: 0, costPoints: 0 },
-  { id: 'trail_violet', name: 'Violet Trail', type: 'trail', costStars: 40_000, costPoints: 0 },
-  { id: 'trail_gold', name: 'Gold Trail', type: 'trail', costStars: 80_000, costPoints: 0 },
-  { id: 'trail_rose', name: 'Rose Trail', type: 'trail', costStars: 120_000, costPoints: 0 },
-  { id: 'trail_ice', name: 'Ice Trail', type: 'trail', costStars: 160_000, costPoints: 0 },
-  { id: 'trail_ember', name: 'Ember Trail', type: 'trail', costStars: 220_000, costPoints: 0 },
-  { id: 'trail_mint', name: 'Mint Trail', type: 'trail', costStars: 280_000, costPoints: 0 },
-  { id: 'trail_aurora', name: 'Aurora Trail', type: 'trail', costStars: 360_000, costPoints: 0 },
-  { id: 'particle_spark', name: 'Spark Particles (starter)', type: 'particle', costStars: 0, costPoints: 0 },
-  { id: 'particle_ember', name: 'Ember Particles', type: 'particle', costStars: 60_000, costPoints: 0 },
-  { id: 'particle_frost', name: 'Frost Particles', type: 'particle', costStars: 100_000, costPoints: 0 },
-  { id: 'particle_blossom', name: 'Blossom Particles', type: 'particle', costStars: 150_000, costPoints: 0 },
-  { id: 'particle_nova', name: 'Nova Particles', type: 'particle', costStars: 240_000, costPoints: 0 },
-];
-
-const ALL_ITEMS = [
-  ...NORMAL_ITEMS.map((i) => ({ ...i, section: 'normal' })),
-  ...PREMIUM_ITEMS.map((i) => ({ ...i, section: 'premium' })),
-  ...LEGACY_ITEMS.map((i) => ({ ...i, section: 'legacy' })),
-];
+const ALL_ITEMS = [...NORMAL_ITEMS.map((i) => ({ ...i, section: 'normal' })), ...PREMIUM_ITEMS.map((i) => ({ ...i, section: 'premium' }))];
 
 /* ========================= 2. RESPONSE + CORS HELPERS ======================= */
 
@@ -285,12 +252,9 @@ async function handleReferralStart(request, env) {
 }
 
 /** POST /api/referral/check-rewards
- *  Body: { initData, starsEarnedThisRun, bonusOnly? }
+ *  Body: { initData, starsEarnedThisRun }
  *  Call this once, right after a run ends (in addition to, not instead of,
  *  the existing local save — see the integration notes in README.md).
- *  `bonusOnly: true` is used for a bonus payout on top of an
- *  already-reported run (e.g. a "Double Stars" ad) — see the isBonusOnly
- *  comment below for exactly what that skips.
  *
  *  DB calls — see the full breakdown table in README.md; common cases:
  *    organic player, no referrer:            2 calls (1 read + 1 write)
@@ -307,20 +271,11 @@ async function handleCheckRewards(request, env) {
   if (!Number.isFinite(starsEarned) || starsEarned < 0) return fail('Invalid starsEarnedThisRun', 400, env);
   starsEarned = Math.min(Math.floor(starsEarned), MAX_STARS_PER_RUN); // sanity clamp, see CONFIG note
 
-  // bonusOnly: true means this call is reporting a *bonus* to an
-  // already-reported run (currently: the "Double Stars" rewarded-ad payout,
-  // sent as a second call for just the extra half). Star-total milestones
-  // (100k/300k/700k) still apply — the player's total genuinely went up —
-  // but this must NOT count as a second "run": no runs_completed increment,
-  // no first-run reward, and no re-evaluating the successful-referral
-  // (30-star) threshold, since that's tied to actual gameplay runs.
-  const isBonusOnly = !!body.bonusOnly;
-
   const db = env.DB;
   const invitee = await getUserForRewards(db, userId); // 1 SELECT
-  const isFirstRun = !isBonusOnly && invitee.runs_completed === 0;
+  const isFirstRun = invitee.runs_completed === 0;
   const newTotalStars = invitee.total_stars + starsEarned;
-  const newRunsCompleted = isBonusOnly ? invitee.runs_completed : invitee.runs_completed + 1;
+  const newRunsCompleted = invitee.runs_completed + 1;
 
   const newlyCrossed = STAR_MILESTONES.filter((m) => !invitee[m.flag] && newTotalStars >= m.threshold);
 
@@ -346,7 +301,7 @@ async function handleCheckRewards(request, env) {
 
     // --- Conditional write: does this run make the referral "successful"? ---
     let justCompleted = false;
-    if (!isBonusOnly && starsEarned >= SUCCESSFUL_REFERRAL_STAR_THRESHOLD) {
+    if (starsEarned >= SUCCESSFUL_REFERRAL_STAR_THRESHOLD) {
       const res = await db.prepare(
         `UPDATE referrals SET status = 'completed' WHERE invitee_id = ? AND inviter_id = ? AND status = 'pending'`
       ).bind(userId, inviterId).run();
@@ -469,13 +424,9 @@ async function handleStoreBuy(request, env) {
     starsCost = item.costStars; pointsCost = item.costPoints;
   } else {
     // Normal: either currency alone covers it. Prefer stars if the player
-    // can afford it with stars alone, otherwise fall back to points — but
-    // only if the item actually has a points price. Without the > 0 guard,
-    // a LEGACY_ITEMS entry (costPoints: 0, stars-only by design) would
-    // incorrectly look "affordable for 0 points" to anyone, regardless of
-    // their star balance.
+    // can afford it with stars alone, otherwise fall back to points.
     if (row.total_stars >= item.costStars) starsCost = item.costStars;
-    else if (item.costPoints > 0 && row.invite_points >= item.costPoints) pointsCost = item.costPoints;
+    else if (row.invite_points >= item.costPoints) pointsCost = item.costPoints;
     else return fail('Insufficient balance', 402, env);
   }
 
