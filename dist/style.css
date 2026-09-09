@@ -294,11 +294,26 @@ button { font-family: inherit; }
 
 /* ============================ Sub-header (settings/collection) ========== */
 .sub-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 14px 14px;
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 14px;
 }
-.sub-header h2 { font-family: var(--font-display); font-size: 18px; margin: 0; }
+.sub-header h2 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  margin: 0;
+  text-align: center;
+  letter-spacing: -0.02em;
+}
 .sub-header-spacer { width: 40px; }
+#screen-referral .sub-header {
+  padding-top: 6px;
+}
+#screen-referral .sub-header .pill {
+  justify-self: end;
+}
 
 /* ============================ Settings =================================== */
 .settings-list { padding: 6px 20px; display: flex; flex-direction: column; gap: 4px; }
@@ -340,35 +355,87 @@ button { font-family: inherit; }
 .swatch .lock-icon { position: absolute; top: 4px; right: 6px; font-size: 10px; }
 
 /* ============================ Referral screen =============================== */
-.referral-section { padding: 4px 20px 18px; }
-.referral-blurb { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+#screen-referral {
+  padding-top: 8px;
+}
+.referral-section { padding: 4px 18px 18px; }
+.referral-blurb {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 0 0 16px;
+  max-width: 680px;
+}
 .referral-link-box {
-  background: var(--bg-panel-2);
+  background: rgba(34, 45, 62, 0.72);
   border: 1px solid rgba(234,242,255,0.1);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  border-radius: 12px;
+  padding: 14px 16px;
   font-size: 12px;
   color: var(--accent-glow);
   word-break: break-all;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
 }
-.referral-actions { display: flex; gap: 10px; }
-.referral-actions .btn { flex: 1; }
-.referral-section h3 { font-family: var(--font-display); font-size: 14px; color: var(--text-primary); margin: 0 0 12px; font-weight: 600; }
-.referral-section h3 span { color: var(--star-gold); }
+.referral-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.referral-actions .btn {
+  flex: 1;
+  min-height: 52px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.referral-section h3 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--text-primary);
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.referral-section h3 span {
+  color: var(--star-gold);
+}
 
-.milestone-list { display: flex; flex-direction: column; gap: 8px; }
-.milestone-row {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--bg-panel-2);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-  border: 1px solid rgba(234,242,255,0.06);
+.milestone-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.milestone-row.claimed { border-color: rgba(127,231,220,0.35); }
-.milestone-row .milestone-label { font-size: 13px; color: var(--text-primary); }
-.milestone-row .milestone-reward { font-size: 11px; color: var(--text-muted); }
-.milestone-row .milestone-check { font-size: 16px; color: var(--accent-glow); }
+.milestone-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(21, 31, 48, 0.9);
+  border-radius: 12px;
+  padding: 12px 16px;
+  border: 1px solid rgba(234,242,255,0.06);
+  min-height: 62px;
+}
+.milestone-row.claimed {
+  border-color: rgba(127,231,220,0.35);
+  background: rgba(18, 36, 44, 0.88);
+}
+.milestone-row .milestone-label {
+  font-size: 15px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.milestone-row .milestone-reward {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.milestone-row .milestone-check {
+  font-size: 18px;
+  color: var(--accent-glow);
+  font-weight: 700;
+}
 
 /* ============================ Store screen =================================== */
 .store-balance-row { display: flex; gap: 10px; justify-content: center; padding: 0 20px 14px; }
