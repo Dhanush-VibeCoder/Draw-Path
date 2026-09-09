@@ -50,9 +50,8 @@ const CONFIG = {
   SAVE_DEBOUNCE_MS: 800,
 };
 
-// Referral + Store backend (Cloudflare Worker + D1) — see /glow-path-backend.
-// TODO: replace with your deployed Worker URL after `wrangler deploy`.
-const BACKEND_API_BASE = 'https://glow-path-api.YOUR-SUBDOMAIN.workers.dev';
+// Referral + Store backend (Cloudflare Worker + D1)
+const BACKEND_API_BASE = 'https://glow-path-api.212g1a0525.workers.dev';
 
 // TODO: replace with your actual bot username and Mini App short name
 // (from BotFather) — used only to build the shareable referral link.
@@ -331,6 +330,10 @@ function buildSwatch(item, kind) {
       persistSave();
       renderCollectionGrids();
       showToast(`${item.name} unlocked!`);
+      // Mirror this purchase server-side too, so the authoritative D1
+      // total_stars ledger (used by the Store) stays in sync with what
+      // was just spent locally. Best-effort — see section 16.
+      mirrorLegacyPurchaseToServer(kind, item.id);
     } else {
       hapticNotify('error');
       showToast('Not enough stars yet');
@@ -1056,10 +1059,16 @@ function wireAdButtons() {
       const scoreEl = document.getElementById('resultsScore');
       const doubled = (parseInt(scoreEl.textContent, 10) || 0) * 2;
       scoreEl.textContent = doubled;
-      save.totalStars += doubled / 2; // the other half, since the single value was already added
+      const bonusHalf = doubled / 2; // the other half, since the single value was already added
+      save.totalStars += bonusHalf;
       save.highScore = Math.max(save.highScore, doubled);
       persistSave();
       btn.textContent = 'Doubled!';
+      // Tell the backend about the extra half too (bonusOnly: true — see
+      // section 16), so the authoritative D1 total_stars ledger reflects
+      // the doubled amount, not just the original single value it already
+      // received from the earlier check-rewards call in finishRound().
+      backendCheckRewards(bonusHalf, { bonusOnly: true });
     }, btn);
   });
 }
@@ -1086,6 +1095,16 @@ function onRoundFinished(finalScore, comboReached, wasDaily) {
  * (no initData), every function here fails silently and the game continues
  * exactly as it did before this backend existed. Nothing in here is allowed
  * to block gameplay, the save system, or the UI.
+ *
+ * UNIFIED CURRENCY NOTE
+ * The backend's D1 `total_stars` is now the single authoritative ledger
+ * whenever it's reachable. The local `save.totalStars` is still updated
+ * optimistically the instant a run ends or a purchase happens (so the game
+ * stays fully playable offline / with no backend configured, per the
+ * original design), but every successful backend call below reconciles
+ * `save.totalStars` to the server's returned value afterward — so any
+ * drift (a failed sync, a purchase made from the Store, etc.) self-heals
+ * within one successful round trip instead of accumulating forever.
  */
 
 function backendConfigured() {
@@ -1108,18 +1127,34 @@ async function backendReferralStart() {
   }
 }
 
-/** Called once per finished run. Reports this run's stars to the backend so
- *  referral milestones can be evaluated server-side. Does not itself change
- *  any local state — energy/cosmetic effects arrive later via
- *  backendSyncProfile(), which is the single place local save gets touched. */
-async function backendCheckRewards(starsEarnedThisRun) {
+/** Called after a finished run (and, with `bonusOnly: true`, after a
+ *  "Double Stars" ad reward) to report stars to the backend so referral
+ *  milestones can be evaluated server-side. `bonusOnly` tells the backend
+ *  this isn't a new gameplay run — it should still add the stars and check
+ *  star-total milestones, but must NOT increment the run counter or
+ *  re-evaluate the "first run" / successful-referral checks a second time
+ *  for the same run.
+ *
+ *  On success, reconciles save.totalStars to the server's authoritative
+ *  total — see the UNIFIED CURRENCY NOTE above. */
+async function backendCheckRewards(starsEarnedThisRun, opts = {}) {
   if (!backendConfigured()) return;
   try {
-    await fetch(`${BACKEND_API_BASE}/api/referral/check-rewards`, {
+    const res = await fetch(`${BACKEND_API_BASE}/api/referral/check-rewards`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initData: tg.initData, starsEarnedThisRun }),
+      body: JSON.stringify({
+        initData: tg.initData,
+        starsEarnedThisRun,
+        bonusOnly: !!opts.bonusOnly,
+      }),
     });
+    const result = await res.json();
+    if (result && result.ok && typeof result.totalStars === 'number') {
+      save.totalStars = result.totalStars;
+      persistSave();
+      refreshMenu();
+    }
     // Pull any resulting reward (e.g. energy from a referral bonus) into
     // the local save right away, so it's visible without waiting for the
     // next app launch.
@@ -1129,14 +1164,13 @@ async function backendCheckRewards(starsEarnedThisRun) {
   }
 }
 
-/** Merges server-side energy (granted via referral rewards) into the local
- *  save. Uses save.serverEnergySynced as a watermark so repeated calls
- *  never credit the same server-side energy twice — only the *new* amount
- *  since the last successful sync is added. Cosmetics/invite points earned
- *  via referrals live purely server-side for now (surfaced through
- *  /api/user/profile and the Store endpoints) and don't need local
- *  reconciliation the way energy does, since the existing game only reads
- *  trail/particle unlocks from the local save's own unlock lists. */
+/** Merges server-side state into the local save: energy granted via
+ *  referral rewards, and the authoritative total_stars figure (see the
+ *  UNIFIED CURRENCY NOTE above). Energy uses save.serverEnergySynced as a
+ *  watermark so repeated calls never credit the same server-side energy
+ *  twice — only the *new* amount since the last successful sync is added.
+ *  total_stars is a plain overwrite, since the server is the single source
+ *  of truth for it once the backend is configured. */
 async function backendSyncProfile() {
   if (!backendConfigured()) return;
   try {
@@ -1147,15 +1181,55 @@ async function backendSyncProfile() {
     const profile = await res.json();
     if (!profile || !profile.ok) return;
 
+    let changed = false;
+
     const delta = profile.energy - (save.serverEnergySynced || 0);
     if (delta > 0) {
       addEnergy(delta);
       save.serverEnergySynced = profile.energy;
+      changed = true;
+    }
+    if (typeof profile.totalStars === 'number' && profile.totalStars !== save.totalStars) {
+      save.totalStars = profile.totalStars;
+      changed = true;
+    }
+    if (changed) {
       persistSave();
-      refreshMenu(); // reflect the new energy immediately if the menu is visible
+      refreshMenu(); // reflect the new energy/stars immediately if the menu is visible
     }
   } catch (e) {
     // Best-effort — local energy regen keeps working regardless.
+  }
+}
+
+/** Mirrors a Collection-screen (original local trail/particle unlock)
+ *  purchase to the backend, so the server's total_stars ledger reflects
+ *  the same spend the player just made locally. Uses the same
+ *  /api/store/buy endpoint the new Store screen uses — the backend's
+ *  LEGACY_ITEMS catalog (worker.js) has a matching trail_ or particle_
+ *  entry, with the server as the source of truth for the actual cost (a
+ *  client-supplied cost is never trusted). Best-effort and silent: if it
+ *  fails, the item is still unlocked locally (unchanged behavior), and the
+ *  next backendSyncProfile() call will simply reconcile whatever the
+ *  server's total_stars actually is. */
+async function mirrorLegacyPurchaseToServer(kind, itemId) {
+  if (!backendConfigured()) return;
+  try {
+    const res = await fetch(`${BACKEND_API_BASE}/api/store/buy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData, itemId: `${kind}_${itemId}` }),
+    });
+    const result = await res.json();
+    if (result && result.ok) {
+      await backendSyncProfile(); // pull the corrected server total back in
+    }
+    // A failure here (e.g. "already owned" if it was already mirrored
+    // once, or a transient network error) is fine to ignore — the local
+    // unlock already happened and stays the source of truth until the
+    // next successful sync.
+  } catch (e) {
+    // Best-effort — see note above.
   }
 }
 
@@ -1290,8 +1364,18 @@ async function openStoreScreen() {
     if (profile && profile.ok) {
       document.getElementById('storeStars').textContent = profile.totalStars.toLocaleString();
       document.getElementById('storePoints').textContent = profile.invitePoints;
+      // Keep the local save in step with the server here too, since this
+      // screen is a natural moment to catch any drift (see section 16).
+      if (typeof profile.totalStars === 'number' && profile.totalStars !== save.totalStars) {
+        save.totalStars = profile.totalStars;
+        persistSave();
+      }
     }
     if (itemsData && itemsData.ok) {
+      // Only show the "normal" and "premium" sections here — the "legacy"
+      // section exists purely so original Collection-screen unlocks have a
+      // matching server-side item id to mirror against (see
+      // mirrorLegacyPurchaseToServer above); it's not a separate storefront.
       const normal = itemsData.items.filter((i) => i.section === 'normal');
       const premium = itemsData.items.filter((i) => i.section === 'premium');
       renderStoreList(document.getElementById('normalItemsList'), normal);
@@ -1316,7 +1400,7 @@ async function buyStoreItem(itemId, buttonEl) {
     if (result && result.ok) {
       hapticNotify('success');
       showToast('Purchased!');
-      openStoreScreen(); // refresh balances + owned state
+      openStoreScreen(); // refresh balances + owned state (also reconciles save.totalStars)
     } else {
       hapticNotify('error');
       showToast((result && result.error) || 'Purchase failed');
@@ -1409,8 +1493,8 @@ async function boot() {
   startMenuLoop();
 
   // Backend sync (referral registration + any pending referral-earned
-  // energy) — fire-and-forget, never blocks first paint. See section 16;
-  // both functions no-op silently if BACKEND_API_BASE hasn't been
+  // energy/stars) — fire-and-forget, never blocks first paint. See section
+  // 16; both functions no-op silently if BACKEND_API_BASE hasn't been
   // configured yet or the player is outside Telegram.
   backendReferralStart().then(() => backendSyncProfile());
 
