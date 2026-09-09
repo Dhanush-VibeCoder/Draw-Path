@@ -500,6 +500,9 @@ export default {
 
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/' || url.pathname === '/healthz') {
+        return ok({ service: 'glow-path-api', status: 'ok', endpoints: ['/api/referral/start', '/api/referral/check-rewards', '/api/store/items', '/api/store/buy', '/api/user/profile'] }, env);
+      }
       if (url.pathname === '/api/referral/start' && request.method === 'POST') {
         return await handleReferralStart(request, env);
       }
