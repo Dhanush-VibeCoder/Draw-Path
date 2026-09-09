@@ -54,11 +54,11 @@ const CONFIG = {
 // TODO: replace with your deployed Worker URL after `wrangler deploy`.
 const BACKEND_API_BASE = 'https://glow-path-api.212g1a0525.workers.dev';
 
-// TODO: replace with your actual bot username and Mini App short name
-// (from BotFather) — used only to build the shareable referral link.
-// Telegram deep-links must use the bare username, without the leading @.
+// Must match the exact values configured in BotFather.
+// Telegram deep-links use the bare username and the app short name exactly as
+// registered in BotFather, without the leading @.
 const TELEGRAM_BOT_USERNAME = 'Glow_Path_Game_bot';
-const TELEGRAM_APP_SHORT_NAME = 'Glow_Path_Game';
+const TELEGRAM_APP_SHORT_NAME = 'Glow_Path';
 
 // Mirrors the milestone table in worker.js — kept here only for display
 // (labels/order); the backend is the source of truth for what's granted.
@@ -1172,17 +1172,15 @@ function buildReferralLink() {
   const appName = (TELEGRAM_APP_SHORT_NAME || '').replace(/^@/, '').trim();
   const referralParam = `ref${myId}`;
 
-  // Prefer the bot-root deep link for maximum compatibility with Telegram Mini App
-  // registration. Some bots reject the /<app-name> link if the app short name does
-  // not exactly match BotFather's registered app short name or if the Mini App is
-  // not yet published in the bot's app list. The root bot URL still accepts the
-  // startapp param and is the safe option for referrals.
-  if (botName) {
-    return `https://t.me/${botName}?startapp=${referralParam}`;
+  // Match the exact Mini App path registered in BotFather. This is the working
+  // direct-link format when the bot has an app created and the short name is set.
+  // The bot-root URL is kept as a fallback only if the app name is empty.
+  if (botName && appName) {
+    return `https://t.me/${botName}/${appName}?startapp=${referralParam}`;
   }
 
-  if (appName) {
-    return `https://t.me/${botName}/${appName}?startapp=${referralParam}`;
+  if (botName) {
+    return `https://t.me/${botName}?startapp=${referralParam}`;
   }
 
   return null;
